@@ -1,0 +1,47 @@
+{
+  "name": "pi-session-sweep",
+  "version": "0.1.0",
+  "description": "Session management and cleanup extension for the Pi coding agent with native Antigravity (agy) conversation cleanup.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "session",
+    "sweep",
+    "drop",
+    "antigravity"
+  ],
+  "author": "teededung",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/teededung/pi-session-sweep.git"
+  },
+  "homepage": "https://github.com/teededung/pi-session-sweep#readme",
+  "bugs": {
+    "url": "https://github.com/teededung/pi-session-sweep/issues"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  }
+}
