@@ -9,6 +9,7 @@ import {
   frameDivider,
   frameLine,
   resolveOverlayOptions,
+  type KeybindingsLike,
   type OverlaySizePreferences,
   type ThemeLike,
 } from "./frame-helpers.ts";
@@ -40,15 +41,23 @@ function buildAgentRow(
 }
 
 class AgentTargetPicker extends ListPicker {
+  private readonly agents: readonly SelectableAgent[];
+  private readonly currentAgentName: string | null;
+  private readonly onSelect: (agentName: string | null) => void;
+
   constructor(
-    private readonly agents: readonly SelectableAgent[],
-    private readonly currentAgentName: string | null,
+    agents: readonly SelectableAgent[],
+    currentAgentName: string | null,
     theme: ThemeLike,
     maxRenderRows: number,
-    private readonly onSelect: (agentName: string | null) => void,
+    onSelect: (agentName: string | null) => void,
     requestRender: () => void,
+    keybindings?: KeybindingsLike,
   ) {
-    super(theme, maxRenderRows, requestRender);
+    super(theme, maxRenderRows, requestRender, keybindings);
+    this.agents = agents;
+    this.currentAgentName = currentAgentName;
+    this.onSelect = onSelect;
     const currentIndex = currentAgentName
       ? agents.findIndex((agent) => agent.name === currentAgentName)
       : -1;
@@ -100,7 +109,7 @@ class AgentTargetPicker extends ListPicker {
   }
 
   protected handlePickerAction(data: string): void {
-    if (matchesKey(data, "return")) {
+    if (this.keybindings?.matches(data, "tui.select.confirm") || matchesKey(data, "return")) {
       const agent = this.agents[this.cursorIndex];
       this.onSelect(agent?.name ?? null);
     }
@@ -122,7 +131,7 @@ export async function showAgentTargetPicker(
   let resolved = false;
 
   await ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) =>
+    (tui, theme, keybindings, done) =>
       new AgentTargetPicker(
         agents,
         currentAgentName,
@@ -136,6 +145,7 @@ export async function showAgentTargetPicker(
         () => {
           tui.requestRender();
         },
+        keybindings,
       ),
     {
       overlay: true,

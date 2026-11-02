@@ -1,20 +1,46 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import {
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    try {
+      return nextResolve(specifier, context);
+    } catch (error) {
+      if (specifier === "@earendil-works/pi-tui") {
+        return {
+          url:
+            "data:text/javascript," +
+            encodeURIComponent(
+              "export const matchesKey = (d, k) => d === k;" +
+                "export const truncateToWidth = (t, w) => String(t).slice(0, w);" +
+                "export const visibleWidth = (t) => String(t).length;",
+            ),
+          shortCircuit: true,
+        };
+      }
+      throw error;
+    }
+  },
+});
+
+const {
   deleteAgyConversation,
   extractAgyConversationIds,
-} from "../src/session-antigravity.ts";
-import {
+} = await import("../src/session-antigravity.ts");
+const {
   DROP_ARGUMENT_COMPLETIONS,
   SWEEP_ARGUMENT_COMPLETIONS,
   getMatchedCompletions,
-} from "../src/argument-completions.ts";
-import { sortSessionsNewestFirst } from "../src/session-sort.ts";
+} = await import("../src/argument-completions.ts");
+const { sortSessionsNewestFirst } = await import("../src/session-sort.ts");
+const { shortenPath } = await import("../src/session-format.ts");
+const { ListPicker } = await import("../src/tui/list-picker-base.ts");
+import type { KeybindingsLike } from "../src/tui/frame-helpers.ts";
 
 test("extractAgyConversationIds respects sessionId ownership on forked sessions", async (t) => {
   const tmp = await mkdtemp(path.join(tmpdir(), "pi-session-sweep-fork-"));
@@ -199,4 +225,54 @@ test("argument completions and session sorting work as expected", () => {
   const sorted = sortSessionsNewestFirst([older, newer]);
   assert.equal(sorted[0]?.id, "2");
   assert.equal(sorted[1]?.id, "1");
+});
+
+test("shortenPath respects home directory boundaries and ListPicker honors Pi 1.5.0 viewport & keybindings", () => {
+  assert.equal(shortenPath("/Users/alice", "/Users/alice"), "~");
+  assert.equal(shortenPath("/Users/alice/work/repo", "/Users/alice"), "~/work/repo");
+  assert.equal(shortenPath("/Users/alice2/work/repo", "/Users/alice"), "/Users/alice2/work/repo");
+
+  class DummyPicker extends ListPicker {
+    cancelled = false;
+    confirmed = false;
+    constructor(kb?: KeybindingsLike) {
+      super({}, 20, () => {}, kb);
+      this.prepareViewport(5);
+    }
+    get cursor(): number {
+      return this.cursorIndex;
+    }
+    protected get itemCount(): number {
+      return 12;
+    }
+    protected get minRenderHeight(): number {
+      return 6;
+    }
+    protected onCancel(): void {
+      this.cancelled = true;
+    }
+    protected handlePickerAction(data: string): void {
+      if (this.keybindings?.matches(data, "tui.select.confirm")) {
+        this.confirmed = true;
+      }
+    }
+    render(): string[] {
+      return [];
+    }
+  }
+
+  const kb: KeybindingsLike = {
+    matches: (data, action) =>
+      (data === "CUSTOM_PGDN" && action === "tui.select.pageDown") ||
+      (data === "CUSTOM_OK" && action === "tui.select.confirm") ||
+      (data === "CUSTOM_ESC" && action === "tui.select.cancel"),
+  };
+  const picker = new DummyPicker(kb);
+  assert.equal(picker.capturesViewportInput, true);
+  picker.handleInput("CUSTOM_PGDN");
+  assert.equal(picker.cursor, 4);
+  picker.handleInput("CUSTOM_OK");
+  assert.equal(picker.confirmed, true);
+  picker.handleInput("CUSTOM_ESC");
+  assert.equal(picker.cancelled, true);
 });

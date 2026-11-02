@@ -20,6 +20,7 @@ import {
   frameDivider,
   frameLine,
   resolveOverlayOptions,
+  type KeybindingsLike,
   type OverlaySizePreferences,
   type ThemeLike,
 } from "./frame-helpers.ts";
@@ -169,17 +170,26 @@ function buildSessionRow(
 
 class SessionSweepPicker extends ListPicker {
   private inlineMessage: string | null = null;
+  private readonly sessions: readonly SweepSessionInfo[];
+  private readonly selectedPaths: Set<string>;
+  private readonly icons: PickerIcons;
+  private readonly onFinish: PickerResultHandler;
 
   constructor(
-    private readonly sessions: readonly SweepSessionInfo[],
-    private readonly selectedPaths: Set<string>,
+    sessions: readonly SweepSessionInfo[],
+    selectedPaths: Set<string>,
     theme: ThemeLike,
-    private readonly icons: PickerIcons,
+    icons: PickerIcons,
     maxRenderRows: number,
-    private readonly onFinish: PickerResultHandler,
+    onFinish: PickerResultHandler,
     requestRender: () => void,
+    keybindings?: KeybindingsLike,
   ) {
-    super(theme, maxRenderRows, requestRender);
+    super(theme, maxRenderRows, requestRender, keybindings);
+    this.sessions = sessions;
+    this.selectedPaths = selectedPaths;
+    this.icons = icons;
+    this.onFinish = onFinish;
   }
 
   protected get itemCount(): number {
@@ -298,7 +308,7 @@ class SessionSweepPicker extends ListPicker {
       return;
     }
 
-    if (matchesKey(data, "return")) {
+    if (this.keybindings?.matches(data, "tui.select.confirm") || matchesKey(data, "return")) {
       if (this.selectedPaths.size === 0) {
         this.inlineMessage = "No sessions selected. Toggle at least one session first.";
         this.requestRender();
@@ -365,7 +375,7 @@ export async function showSessionSweepPicker(
   let finalResult: SessionSelectionResult | null = null;
 
   await ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) => {
+    (tui, theme, keybindings, done) => {
       const picker = new SessionSweepPicker(
         sessions,
         selectedPaths,
@@ -379,6 +389,7 @@ export async function showSessionSweepPicker(
         () => {
           tui.requestRender();
         },
+        keybindings,
       );
 
       return picker;

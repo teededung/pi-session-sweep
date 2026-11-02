@@ -1,6 +1,6 @@
 {
   "name": "pi-session-sweep",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Session management and cleanup extension for the Pi coding agent with native Antigravity (agy) conversation cleanup.",
   "type": "module",
   "main": "./src/index.ts",
@@ -27,6 +27,7 @@
   "files": [
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "pi": {

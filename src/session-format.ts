@@ -20,13 +20,19 @@ function clipText(value: string, max = LABEL_MAX_TEXT): string {
   return `${value.slice(0, Math.max(1, max - 1))}…`;
 }
 
-export function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) {
-    return `~${path.slice(home.length)}`;
+export function shortenPath(filePath: string, home = homedir()): string {
+  if (!home || !filePath) {
+    return filePath;
+  }
+  if (filePath === home) {
+    return "~";
+  }
+  const sep = filePath.charAt(home.length);
+  if (filePath.startsWith(home) && (sep === "/" || sep === "\\")) {
+    return `~${filePath.slice(home.length)}`;
   }
 
-  return path;
+  return filePath;
 }
 
 export function formatSessionAge(date: Date, now = Date.now()): string {

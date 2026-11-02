@@ -10,19 +10,31 @@ import {
   moveCursorWithinBounds,
   resolveMaxRenderRows as resolveMaxRenderRowsBase,
   resolveNavigationKey,
+  type KeybindingsLike,
   type ThemeLike,
 } from "./frame-helpers.ts";
 
 export abstract class ListPicker implements Component {
+  readonly capturesViewportInput = true;
   protected cursorIndex = 0;
   protected scrollOffset = 0;
   protected lastViewportSize = 1;
+  protected readonly theme: ThemeLike;
+  protected readonly maxRenderRows: number;
+  protected readonly requestRender: () => void;
+  protected readonly keybindings?: KeybindingsLike;
 
   protected constructor(
-    protected readonly theme: ThemeLike,
-    protected readonly maxRenderRows: number,
-    protected readonly requestRender: () => void,
-  ) {}
+    theme: ThemeLike,
+    maxRenderRows: number,
+    requestRender: () => void,
+    keybindings?: KeybindingsLike,
+  ) {
+    this.theme = theme;
+    this.maxRenderRows = maxRenderRows;
+    this.requestRender = requestRender;
+    this.keybindings = keybindings;
+  }
 
   protected abstract get itemCount(): number;
 
@@ -39,7 +51,12 @@ export abstract class ListPicker implements Component {
   protected onCursorMoved(): void {}
 
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c") || matchesKey(data, "q")) {
+    if (
+      this.keybindings?.matches(data, "tui.select.cancel") ||
+      matchesKey(data, "escape") ||
+      matchesKey(data, "ctrl+c") ||
+      matchesKey(data, "q")
+    ) {
       this.onCancel();
       return;
     }
@@ -52,7 +69,7 @@ export abstract class ListPicker implements Component {
   }
 
   protected handleNavigation(data: string): boolean {
-    const navigation = resolveNavigationKey(data, this.lastViewportSize);
+    const navigation = resolveNavigationKey(data, this.lastViewportSize, this.keybindings);
     if (!navigation.handled) {
       return false;
     }

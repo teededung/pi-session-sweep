@@ -5,6 +5,10 @@ export interface ThemeLike {
   bold?: unknown;
 }
 
+export interface KeybindingsLike {
+  matches(data: string, action: string): boolean;
+}
+
 export interface OverlayOptions {
   anchor: "center";
   width: number;
@@ -216,20 +220,29 @@ export function moveCursorWithinBounds(
 export function resolveNavigationKey(
   data: string,
   viewportSize: number,
+  keybindings?: KeybindingsLike,
 ): NavigationKeyResult {
-  if (matchesKey(data, "up") || matchesKey(data, "k")) {
+  if (
+    keybindings?.matches(data, "tui.select.up") ||
+    matchesKey(data, "up") ||
+    matchesKey(data, "k")
+  ) {
     return { handled: true, action: "move", delta: -1 };
   }
 
-  if (matchesKey(data, "down") || matchesKey(data, "j")) {
+  if (
+    keybindings?.matches(data, "tui.select.down") ||
+    matchesKey(data, "down") ||
+    matchesKey(data, "j")
+  ) {
     return { handled: true, action: "move", delta: 1 };
   }
 
-  if (matchesKey(data, "pageUp")) {
+  if (keybindings?.matches(data, "tui.select.pageUp") || matchesKey(data, "pageUp")) {
     return { handled: true, action: "move", delta: -Math.max(1, viewportSize - 1) };
   }
 
-  if (matchesKey(data, "pageDown")) {
+  if (keybindings?.matches(data, "tui.select.pageDown") || matchesKey(data, "pageDown")) {
     return { handled: true, action: "move", delta: Math.max(1, viewportSize - 1) };
   }
 
