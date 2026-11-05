@@ -142,6 +142,113 @@ export function extractAgyConversationIds(
 }
 
 /**
+ * Synchronously purges `conversation_summaries.db` rows and JSON cache entries
+ * (`cache/conversation_metadata.json`, `cache/last_conversations.json`) for a
+ * known set of lowercased Antigravity conversation IDs.
+ *
+ * Safe to invoke inside `process.once("exit")` after all extensions'
+ * `session_shutdown` hooks have terminated any warm `agy acp` daemon that
+ * might have flushed a ghost summary row on `SIGTERM`.
+ */
+export function purgeAgyConversationIndexesSync(
+  idsToDelete: Iterable<string>,
+  homeDirectory = homedir(),
+): void {
+  const normalizedIds = new Set<string>();
+  for (const id of idsToDelete) {
+    const clean = id?.trim().toLowerCase();
+    if (clean && UUID_REGEX.test(clean)) {
+      normalizedIds.add(clean);
+    }
+  }
+  if (normalizedIds.size === 0) return;
+
+  const agyCliDir = join(homeDirectory, ".gemini", "antigravity-cli");
+  const summariesDbPath = join(agyCliDir, "conversation_summaries.db");
+  if (existsSync(summariesDbPath)) {
+    let summaryDb: DatabaseSync | undefined;
+    try {
+      summaryDb = new DatabaseSync(summariesDbPath);
+      summaryDb.exec("PRAGMA busy_timeout = 2000;");
+      try {
+        const deleteById = summaryDb.prepare(
+          "DELETE FROM conversation_summaries WHERE LOWER(conversation_id) = ?",
+        );
+        for (const cid of normalizedIds) {
+          deleteById.run(cid);
+        }
+      } catch {
+        // Best-effort
+      }
+      try {
+        const deleteByParent = summaryDb.prepare(
+          "DELETE FROM conversation_summaries WHERE LOWER(parent_conversation_id) = ?",
+        );
+        for (const cid of normalizedIds) {
+          deleteByParent.run(cid);
+        }
+      } catch {
+        // Optional column
+      }
+    } catch {
+      // Ignore locked/corrupt DB on exit
+    } finally {
+      try {
+        summaryDb?.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+  }
+
+  // Clean cache/conversation_metadata.json
+  const metadataPath = join(agyCliDir, "cache", "conversation_metadata.json");
+  if (existsSync(metadataPath)) {
+    try {
+      const parsed = toRecord(JSON.parse(readFileSync(metadataPath, "utf8")));
+      const conversations = toRecord(parsed?.conversations);
+      if (parsed && conversations) {
+        let changed = false;
+        for (const key of Object.keys(conversations)) {
+          if (normalizedIds.has(key.toLowerCase())) {
+            delete conversations[key];
+            changed = true;
+          }
+        }
+        if (changed) {
+          writeFileSync(metadataPath, JSON.stringify(parsed), "utf8");
+        }
+      }
+    } catch {
+      // Ignore cache update errors
+    }
+  }
+
+  // Clean cache/last_conversations.json
+  const lastConversationsPath = join(agyCliDir, "cache", "last_conversations.json");
+  if (existsSync(lastConversationsPath)) {
+    try {
+      const parsed = toRecord(JSON.parse(readFileSync(lastConversationsPath, "utf8")));
+      if (parsed) {
+        let changed = false;
+        for (const [workspaceKey, mappedId] of Object.entries(parsed)) {
+          const idLower = typeof mappedId === "string" ? mappedId.toLowerCase() : "";
+          if (idLower && normalizedIds.has(idLower)) {
+            delete parsed[workspaceKey];
+            changed = true;
+          }
+        }
+        if (changed) {
+          writeFileSync(lastConversationsPath, JSON.stringify(parsed, null, 2), "utf8");
+        }
+      }
+    } catch {
+      // Ignore last_conversations update errors
+    }
+  }
+}
+
+/**
  * Deletes an Antigravity conversation and all its descendant subagent conversations:
  * - SQLite databases: ~/.gemini/antigravity-cli/conversations/<id>.db*
  * - Metadata annotations: ~/.gemini/antigravity-cli/annotations/<id>.pbtxt
@@ -153,8 +260,8 @@ export function extractAgyConversationIds(
 export async function deleteAgyConversation(
   conversationId: string,
   homeDirectory = homedir(),
-): Promise<void> {
-  if (!conversationId || !UUID_REGEX.test(conversationId)) return;
+): Promise<string[]> {
+  if (!conversationId || !UUID_REGEX.test(conversationId)) return [];
   const agyCliDir = join(homeDirectory, ".gemini", "antigravity-cli");
   const summariesDbPath = join(agyCliDir, "conversation_summaries.db");
 
@@ -223,28 +330,6 @@ export async function deleteAgyConversation(
       }
     }
 
-    if (summaryDb) {
-      try {
-        const deleteById = summaryDb.prepare(
-          "DELETE FROM conversation_summaries WHERE LOWER(conversation_id) = ?",
-        );
-        for (const cid of idsToDelete) {
-          deleteById.run(cid);
-        }
-      } catch {
-        // Best-effort
-      }
-      try {
-        const deleteByParent = summaryDb.prepare(
-          "DELETE FROM conversation_summaries WHERE LOWER(parent_conversation_id) = ?",
-        );
-        for (const cid of idsToDelete) {
-          deleteByParent.run(cid);
-        }
-      } catch {
-        // Optional column
-      }
-    }
   } finally {
     try {
       summaryDb?.close();
@@ -269,51 +354,8 @@ export async function deleteAgyConversation(
     removals.map((target) => fs.rm(target, { recursive: true, force: true }).catch(() => {})),
   );
 
-  // Clean cache/conversation_metadata.json
-  const metadataPath = join(agyCliDir, "cache", "conversation_metadata.json");
-  if (existsSync(metadataPath)) {
-    try {
-      const parsed = toRecord(JSON.parse(readFileSync(metadataPath, "utf8")));
-      const conversations = toRecord(parsed?.conversations);
-      if (parsed && conversations) {
-        let changed = false;
-        for (const key of Object.keys(conversations)) {
-          if (idsToDelete.has(key.toLowerCase())) {
-            delete conversations[key];
-            changed = true;
-          }
-        }
-        if (changed) {
-          writeFileSync(metadataPath, JSON.stringify(parsed), "utf8");
-        }
-      }
-    } catch {
-      // Ignore cache update errors
-    }
-  }
-
-  // Clean cache/last_conversations.json
-  const lastConversationsPath = join(agyCliDir, "cache", "last_conversations.json");
-  if (existsSync(lastConversationsPath)) {
-    try {
-      const parsed = toRecord(JSON.parse(readFileSync(lastConversationsPath, "utf8")));
-      if (parsed) {
-        let changed = false;
-        for (const [workspaceKey, mappedId] of Object.entries(parsed)) {
-          const idLower = typeof mappedId === "string" ? mappedId.toLowerCase() : "";
-          if (idLower && idsToDelete.has(idLower)) {
-            delete parsed[workspaceKey];
-            changed = true;
-          }
-        }
-        if (changed) {
-          writeFileSync(lastConversationsPath, JSON.stringify(parsed, null, 2), "utf8");
-        }
-      }
-    } catch {
-      // Ignore last_conversations update errors
-    }
-  }
+  purgeAgyConversationIndexesSync(idsToDelete, homeDirectory);
+  return Array.from(idsToDelete);
 }
 
 /**

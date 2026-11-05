@@ -31,7 +31,12 @@ registerHooks({
 const {
   deleteAgyConversation,
   extractAgyConversationIds,
+  purgeAgyConversationIndexesSync,
 } = await import("../src/session-antigravity.ts");
+const {
+  flushScheduledSessionDeletionForQuit,
+  scheduleSessionDeletionForQuit,
+} = await import("../src/session-quit-shutdown.ts");
 const {
   DROP_ARGUMENT_COMPLETIONS,
   SWEEP_ARGUMENT_COMPLETIONS,
@@ -276,3 +281,57 @@ test("shortenPath respects home directory boundaries and ListPicker honors Pi 1.
   picker.handleInput("CUSTOM_ESC");
   assert.equal(picker.cancelled, true);
 });
+
+test("flushScheduledSessionDeletionForQuit + purgeAgyConversationIndexesSync sweep ACP ghost summary rows independently", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "pi-session-sweep-quit-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+
+  const agyBase = path.join(home, ".gemini", "antigravity-cli");
+  await mkdir(path.join(agyBase, "conversations"), { recursive: true });
+  await mkdir(path.join(agyBase, "cache"), { recursive: true });
+
+  const cid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const keepCid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  await writeFile(path.join(agyBase, "conversations", `${cid}.db`), "db", "utf8");
+
+  const dbPath = path.join(agyBase, "conversation_summaries.db");
+  const db = new DatabaseSync(dbPath);
+  db.exec(
+    "CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, parent_conversation_id TEXT, title TEXT)",
+  );
+  db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, ?)").run(cid, null, "DropMe");
+  db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, ?)").run(keepCid, null, "KeepMe");
+  db.close();
+
+  const beforeListeners = new Set(process.listeners("exit"));
+  scheduleSessionDeletionForQuit(undefined, [cid]);
+  await flushScheduledSessionDeletionForQuit(
+    { ui: { notify: () => {} } } as unknown as Parameters<typeof flushScheduledSessionDeletionForQuit>[0],
+    { homeDirectory: home, registerProcessExitSweep: true },
+  );
+
+  const addedListeners = process
+    .listeners("exit")
+    .filter((fn) => !beforeListeners.has(fn));
+  assert.equal(addedListeners.length, 1);
+
+  // Simulate a later extension killing warm `agy acp`, which re-inserts a ghost summary row on SIGTERM
+  const ghostDb = new DatabaseSync(dbPath);
+  ghostDb.prepare("INSERT INTO conversation_summaries VALUES (?, ?, ?)").run(cid, null, "Ghost");
+  ghostDb.close();
+
+  // Trigger the registered exit listener (and remove it so test runner exit stays clean)
+  process.removeListener("exit", addedListeners[0]!);
+  addedListeners[0]!(0);
+
+  const checkDb = new DatabaseSync(dbPath, { readOnly: true });
+  const rows = checkDb
+    .prepare("SELECT conversation_id FROM conversation_summaries")
+    .all() as Array<{ conversation_id: string }>;
+  checkDb.close();
+  assert.deepEqual(rows.map((r) => r.conversation_id), [keepCid]);
+
+  // Direct sync helper is also idempotent on empty/already-deleted sets
+  purgeAgyConversationIndexesSync([cid], home);
+});
+
